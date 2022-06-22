@@ -1,0 +1,13 @@
+plubins {
+	id 'org.sonarqube' version 9.4
+}
+
+sonarqube {
+	properties {
+		property "sonar.projectKey", "tosscb-project"
+		property "sonar.host.url", "http://localhost:9000"
+		property "sonar.login", "b37767890114001755259ff663c5d7834cbd3b64"
+		property "sonar.sources", "src'
+		property "sonar.language", "java"		
+	}
+}
