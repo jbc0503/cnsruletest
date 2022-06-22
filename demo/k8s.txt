@@ -1,0 +1,167 @@
+A. without ansible
+https://bono915.tistory.com/entry/kubernetes-%EC%BF%A0%EB%B2%84%EB%84%A4%ED%8B%B0%EC%8A%A4-%EC%84%A4%EC%B9%98-%EB%B0%8F-%ED%99%98%EA%B2%BD%EA%B5%AC%EC%84%B1CentOS-79
+​
+B. with kubespray+ansible
+https://sh-safer.tistory.com/45
+​
+1. host initializing (마스터, 워커 공통)
+(가) 네트워크 세팅 
+(나) 기본유틸설치
+ [root@localhost ~]# yum install epel-release sshpass
+ [root@localhost ~]# yum repolist
+ [root@localhost ~]# yum install -y wget git zile nano net-tools bind-utils iptables-services bridge-utils bash-completetion kexex-tools sos psacct openssl-devel http-tools NetworkManager python-cryptography python2-pip python-devel python-passlib java-1.8.0-openjdk-headless "@Development Tools"
+​
+ 
+2. Host Policy injection (마스터, 워커 공통)
+[root@localhost ~]# hostnamectl set-hostname k8s-master
+[root@localhost ~]# hostnamectl set-hostname k8s-worker1
+[root@localhost ~]# hostnamectl set-hostname k8s-worker2
+[root@localhost ~]#cat <<EOF >> /etc/hosts
+192.168.137.10   k8s-master
+192.168.137.110  k8s-worker1
+192.168.137.210  k8s-worker2
+EOF
+
+255.255.255.0 192.168.137.1
+DNS : 게이트웨이와 동일
+​
+3. SELLINUX 비활성화 (마스터, 워커 공통)
+[root@localhost ~]# setenforce 0
+​
+[root@localhost ~]# sed -i 's/^SELINUX=enforcing$/SELINUX=disabled/' /etc/selinux/config
+​
+4. SWAP 비활성화 (마스터, 워커 공통)
+[root@localhost ~]# swapoff -a
+​
+[root@localhost ~]# sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+​
+5. 방화벽 끄기 (마스터, 워커 공통)
+[root@localhost ~]# systemctl disable firewalld
+​
+[root@localhost ~]# systemctl stop firewalld
+ 
+6. ansible cluster 구성을 위한 ssh 접근허용
+(가) /etc/ssh/sshd_config 수정 
+    PermitRootLogin yes
+(나) ssh 접근허용	
+	[master]#cd ~
+	[master]#ssh-keygen
+			##
+			##
+	[master]#ssh-copy-id -i ~/.ssh/id_rsa.pub k8s-master
+			##
+			##
+==========
+	[worker01]# vi /etc/ssh/sshd_conf
+		#PermitRootLogin yes   <---주석제거
+	[worker02]# vi /etc/ssh/sshd_conf
+		#PermitRootLogin yes   <---주석제거
+========== 
+	[master]#ssh-copy-id -i ~/.ssh/id_rsa.pub k8s-worker1
+	[master]#ssh-copy-id -i ~/.ssh/id_rsa.pub k8s-worker2
+	
+7. kubespray 다운로드
+[master]# cd ~ |mkdir -p ./k8s 
+[root@k8s-master kubespray]# pwd
+/root/k8s/kubespray
+
+[master]# git clone https://github.com/kubernetes-sigs/kubespray.git
+​
+[root@k8s-master k8s]# cd kubespray
+[root@k8s-master kubespray]# ls
+CNAME              _config.yml          legacy_groups.yml          reset.yml
+CONTRIBUTING.md    ansible.cfg          library                    roles
+Dockerfile         ansible_version.yml  logo                       scale.yml
+LICENSE            cluster.yml          recover-control-plane.yml  scripts
+Makefile           code-of-conduct.md   remove-node.yml            setup.cfg
+OWNERS             contrib              requirements-2.10.txt      setup.py
+OWNERS_ALIASES     docs                 requirements-2.11.txt      test-infra
+README.md          extra_playbooks      requirements-2.12.txt      tests
+RELEASE.md         facts.yml            requirements-2.9.txt       upgrade-cluster.yml
+SECURITY_CONTACTS  index.html           requirements-2.9.yml
+Vagrantfile        inventory            requirements.txt
+[root@k8s-master kubespray]# pwd
+/root/k8s/kubespray
+​
+8. prerequisite 설치
+# pip3 install setuptools-rust        <---- https://github.com/MISP/misp-docker/issues/113 
+# pip3 install --upgrade pip          
+​
+[root@k8s-master kubespray]# pip install -r requirements.txt
+​
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+​
+#vi /etc/profile   
+"다음 추가" 
+ PATH=$PATH:/usr/local/bin 
+ export PATH
+ 
+9 다음은 inventory.ini 파일을 설정하는 단계입니다. 우선 sample 디렉토리를 first_cluster로 copy 
+# cp -rfp inventory/sample inventory/first_cluster
+​
+10 firsy_cluster 디렉토리 내 inventory.ini 파일을 열어서 아래와 같이 서버를 등록
+(파일내용)
+[root@k8s-master first_cluster]# cat inventory.ini
+[
+[all]
+k8s-master  ansible_host=192.168.137.10 ip=192.168.137.10
+k8s-worker1 ansible_host=192.168.137.110 ip=192.168.137.110
+k8s-worker2 ansible_host=192.168.137.210 ip=192.168.137.210
+​
+[kube_control_plane]
+k8s-master ansible_host=192.168.137.10 ip=192.168.137.10
+​
+[etcd]
+k8s-master ansible_host=192.168.137.10 ip=192.168.137.10
+k8s-worker1 ansible_host=192.168.137.110 ip=192.168.137.110
+k8s-worker2 ansible_host=192.168.137.210 ip=192.168.137.210
+​
+[kube_node]
+k8s-worker1 ansible_host=192.168.137.110 ip=192.168.137.110
+k8s-worker2 ansible_host=192.168.137.210 ip=192.168.137.210
+​
+[calico_rr]
+​
+[k8s_cluster:children]
+kube_control_plane
+kube_node
+calico_rr
+​
+[all:vars]
+ansible_python_interpreter=/usr/bin/python2
+]
+11. 클러스터 생성
+[root@k8s-master-1 kubespray]# ansible-playbook  -i ./inventory/first_cluster/inventory.ini --become --become-user=root cluster.yml
+​
+-----------------------------------------------------------------------------------------------------------------------------------------------
+[참고1] python 2,3 을 선택하여 사용방법
+(python설치)
+# yum -y install python3 python3-pip ansible python3-argcomplete
+(Alternative 등록)
+# update-alternatives --install /bin/python python /bin/python2.7 5
+# update-alternatives --install /bin/python python /bin/python3.6 8
+(버전바꾸기)
+# update-alternatives --config python
+(버전확인)
+# python --version
+(yum 에러보정)
+# vi /usr/bin/yum   
+"#!/usr/bin/python  => #!/usr/bin/python2" 으로 수정
+​
+#vi /usr/libexec/urlgrabber-ext-down
+"#!/usr/bin/python"  => "#!/usr/bin/python2" 으로 수정
+[참고2]
+https://stackoverflow.com/questions/62100869/ansible-error-the-python-2-bindings-for-rpm-are-needed-for-this-module
+ansible에서 python2의 설정이 필요하다고 메시지가 뜸 --> inventory.ini 를 수정 
+[참고3] 
+https://github.com/kubernetes-sigs/kubespray/issues/8357
+권한문제로 종료된 경우
+[참고4]
+** worker node에 python3을 세팅 해보는 방법을 테스트 해볼 필요가 있음...
+​
+[참고5]
+또다른 설치방법 (for ubuntu)
+https://www.whatwant.com/entry/Kubespray
+자리안비움
+https://diy-dev-design.tistory.com/98#google_vignette
+
