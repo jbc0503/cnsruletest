@@ -1,0 +1,21 @@
+1. ps설치
+apt-get update && apt-get install procps
+2. vi 설치
+# apt-get update
+# apt-get install vim
+
+3.
+dorcker run 
+
+4.
+docker exec -it tomcat /bin/bash
+docker images
+docker stop id
+docker start 
+docker run -d 이미지 --name 이름 -p 포트번호 
+
+5. gradle
+docker run -u root -v "$PWD":/home/gradle/project -w /home/gradle/project gradle
+
+6. Jenkins
+docker run -itd -p 8085:8080 -v /jenkins:/var/jenkins_home --name jenkins -u root jenkins/jenkins
