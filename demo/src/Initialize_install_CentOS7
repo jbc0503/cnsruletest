@@ -1,0 +1,551 @@
+1. host initializing (마스터, 워커 공통)
+(가) 네트워크 세팅 
+[
+[root@localhost ~]# cat /etc/sysconfig/network-scripts/ifcfg-eth0
+
+TYPE=Ethernet
+PROXY_METHOD=none
+BROWSER_ONLY=no
+BOOTPROTO=none
+DEFROUTE=yes
+IPV4_FAILURE_FATAL=no
+IPV6INIT=yes
+IPV6_AUTOCONF=yes
+IPV6_DEFROUTE=yes
+IPV6_FAILURE_FATAL=no
+IPV6_ADDR_GEN_MODE=stable-privacy
+NAME=eth0
+UUID=9437797f-4c24-4b46-b6bc-f0b726226834
+DEVICE=eth0
+ONBOOT=yes
+IPADDR="192.168.100.110"
+PREFIX="24"
+GATEWAY="192.168.100.1"
+DNS1="192.168.100.1"
+[root@localhost ~]#
+]
+(나) 호스트명 변경 (마스터, 워커 공통)
+[
+[root@localhost ~]# hostnamectl set-hostname k8s-master
+[root@localhost ~]# hostnamectl set-hostname k8s-worker1
+[root@localhost ~]# hostnamectl set-hostname k8s-worker2
+]
+(다) hosts 파일 수정  (마스터, 워커 공통)
+[
+[root@localhost ~]#cat <<EOF >> /etc/hosts
+192.168.100.10   k8s-master
+192.168.100.110  k8s-worker1
+192.168.100.210  k8s-worker2
+EOF
+]
+(나) 기본유틸설치
+[
+ [root@localhost ~]# yum install epel-release sshpass
+ [root@localhost ~]# yum repolist
+ [root@localhost ~]# yum install -y wget git zile nano net-tools bind-utils iptables-services bridge-utils bash-completetion kexex-tools sos psacct openssl-devel http-tools NetworkManager python-cryptography python2-pip python-devel python-passlib java-1.8.0-openjdk-headless "@Development Tools"
+]
+
+2. SELLINUX 비활성화 (마스터, 워커 공통)
+[
+[root@localhost ~]# setenforce 0
+
+[root@localhost ~]# sed -i 's/^SELINUX=enforcing$/SELINUX=disabled/' /etc/selinux/config
+]
+3. SWAP 비활성화 (마스터, 워커 공통)
+[
+[root@localhost ~]# swapoff -a
+
+[root@localhost ~]# sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+]
+4. 방화벽 끄기 (마스터, 워커 공통)
+[
+[root@localhost ~]# systemctl disable firewalld
+
+[root@localhost ~]# systemctl stop firewalld
+]
+5. profile 에 path 추가
+[
+[root@localhost ~]# cat <<EOF >> /etc/profile
+PATH=$PATH:/usr/local/bin
+export PATH
+EOF
+]
+6. python 버전 추가[python 2,3 을 선택하여 사용방법]
+[
+(python설치)
+# yum -y install python3 python3-pip python3-argcomplete
+(Alternative 등록)
+# update-alternatives --install /bin/python python /bin/python2.7 5
+# update-alternatives --install /bin/python python /bin/python3.6 8
+(버전바꾸기)
+# update-alternatives --config python
+(버전확인)
+# python --version
+(yum 에러보정)
+# vi /usr/bin/yum   
+"#!/usr/bin/python  => #!/usr/bin/python2" 으로 수정
+
+#vi /usr/libexec/urlgrabber-ext-down
+"#!/usr/bin/python"  => "#!/usr/bin/python2" 으로 수정
+]
+7. prerequisite 설치
+[
+# pip3 install setuptools-rust        <---- https://github.com/MISP/misp-docker/issues/113 
+# pip3 install --upgrade pip      
+]
+########Only in Master#######################
+8. ansible cluster 구성을 위한 ssh 접근허용
+[
+(가)  # del ~/.ssh 
+(나) /etc/ssh/sshd_config 수정 
+    PermitRootLogin yes
+(다) ssh 접근허용	
+	[master]#cd ~
+	[master]#ssh-keygen
+			##
+			##
+	[master]#ssh-copy-id -i ~/.ssh/id_rsa.pub k8s-master
+			##
+			##
+==========
+	[worker01]# vi /etc/ssh/sshd_conf
+		#PermitRootLogin yes   <---주석제거
+	[worker02]# vi /etc/ssh/sshd_conf
+		#PermitRootLogin yes   <---주석제거
+========== 
+	[master]#ssh-copy-id -i ~/.ssh/id_rsa.pub k8s-worker1
+	[master]#ssh-copy-id -i ~/.ssh/id_rsa.pub k8s-worker2
+	
+########Only in Master#######################
+]
+
+########Only in Master#######################
+9. kubespray 다운로드
+[
+[master]# cd ~ |mkdir -p ./k8s 
+[master]# git clone https://github.com/kubernetes-sigs/kubespray.git
+
+[root@k8s-master k8s]# cd kubespray
+[root@k8s-master kubespray]# ls
+CNAME              _config.yml          legacy_groups.yml          reset.yml
+CONTRIBUTING.md    ansible.cfg          library                    roles
+Dockerfile         ansible_version.yml  logo                       scale.yml
+LICENSE            cluster.yml          recover-control-plane.yml  scripts
+Makefile           code-of-conduct.md   remove-node.yml            setup.cfg
+OWNERS             contrib              requirements-2.10.txt      setup.py
+OWNERS_ALIASES     docs                 requirements-2.11.txt      test-infra
+README.md          extra_playbooks      requirements-2.12.txt      tests
+RELEASE.md         facts.yml            requirements-2.9.txt       upgrade-cluster.yml
+SECURITY_CONTACTS  index.html           requirements-2.9.yml
+Vagrantfile        inventory            requirements.txt
+[root@k8s-master kubespray]# pwd
+/root/k8s/kubespray
+]
+10. Requirement 설치
+[root@k8s-master kubespray]# vi requirements.txt
+[
+[root@k8s-master kubespray]# vi requirements-2.12.txt
+[root@k8s-master kubespray]# cat requirements-2.12.txt
+ansible
+ansible-core
+cryptography
+jinja2
+netaddr
+pbr
+jmespath
+ruamel.yaml
+ruamel.yaml.clib
+MarkupSafe
+[root@k8s-master kubespray]#
+]
+[root@k8s-master kubespray]# pip install -r requirements.txt (파일안의 버전은 지운다)
+[
+[root@k8s-master kubespray]#  pip install -r requirements.txt
+Collecting ansible
+  Downloading ansible-4.10.0.tar.gz (36.8 MB)
+     |████████████████████████████████| 36.8 MB 15.1 MB/s
+  Preparing metadata (setup.py) ... done
+Collecting ansible-core
+  Downloading ansible-core-2.11.12.tar.gz (7.1 MB)
+     |████████████████████████████████| 7.1 MB 20.9 MB/s
+  Preparing metadata (setup.py) ... done
+Collecting cryptography
+  Downloading cryptography-37.0.2-cp36-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.1 MB)
+     |████████████████████████████████| 4.1 MB 41.2 MB/s
+Collecting jinja2
+  Downloading Jinja2-3.0.3-py3-none-any.whl (133 kB)
+     |████████████████████████████████| 133 kB 28.6 MB/s
+Collecting netaddr
+  Downloading netaddr-0.8.0-py2.py3-none-any.whl (1.9 MB)
+     |████████████████████████████████| 1.9 MB 28.7 MB/s
+Collecting pbr
+  Downloading pbr-5.9.0-py2.py3-none-any.whl (112 kB)
+     |████████████████████████████████| 112 kB 33.7 MB/s
+Collecting jmespath
+  Downloading jmespath-0.10.0-py2.py3-none-any.whl (24 kB)
+Collecting ruamel.yaml
+  Downloading ruamel.yaml-0.17.21-py3-none-any.whl (109 kB)
+     |████████████████████████████████| 109 kB 34.0 MB/s
+Collecting ruamel.yaml.clib
+  Downloading ruamel.yaml.clib-0.2.6-cp36-cp36m-manylinux1_x86_64.whl (552 kB)
+     |████████████████████████████████| 552 kB 13.8 MB/s
+Collecting MarkupSafe
+  Downloading MarkupSafe-2.0.1-cp36-cp36m-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl (30 kB)
+Collecting PyYAML
+  Downloading PyYAML-6.0-cp36-cp36m-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl (603 kB)
+     |████████████████████████████████| 603 kB 23.8 MB/s
+Collecting packaging
+  Downloading packaging-21.3-py3-none-any.whl (40 kB)
+     |████████████████████████████████| 40 kB 960 kB/s
+Collecting resolvelib<0.6.0,>=0.5.3
+  Downloading resolvelib-0.5.4-py2.py3-none-any.whl (12 kB)
+Collecting cffi>=1.12
+  Downloading cffi-1.15.0-cp36-cp36m-manylinux_2_5_x86_64.manylinux1_x86_64.whl (405 kB)
+     |████████████████████████████████| 405 kB 28.8 MB/s
+Collecting importlib-resources
+  Downloading importlib_resources-5.4.0-py3-none-any.whl (28 kB)
+Collecting pycparser
+  Downloading pycparser-2.21-py2.py3-none-any.whl (118 kB)
+     |████████████████████████████████| 118 kB 30.0 MB/s
+Collecting zipp>=3.1.0
+  Downloading zipp-3.6.0-py3-none-any.whl (5.3 kB)
+Collecting pyparsing!=3.0.5,>=2.0.2
+  Downloading pyparsing-3.0.9-py3-none-any.whl (98 kB)
+     |████████████████████████████████| 98 kB 1.4 MB/s
+Using legacy 'setup.py install' for ansible, since package 'wheel' is not installed.
+Using legacy 'setup.py install' for ansible-core, since package 'wheel' is not installed.
+Installing collected packages: pycparser, pyparsing, MarkupSafe, cffi, zipp, resolvelib, PyYAML, packaging, jinja2, cryptography, ruamel.yaml.clib, importlib-resources, ansible-core, ruamel.yaml, pbr, netaddr, jmespath, ansible
+    Running setup.py install for ansible-core ... done
+    Running setup.py install for ansible ... done
+Successfully installed MarkupSafe-2.0.1 PyYAML-6.0 ansible-4.10.0 ansible-core-2.11.12 cffi-1.15.0 cryptography-37.0.2 importlib-resources-5.4.0 jinja2-3.0.3 jmespath-0.10.0 netaddr-0.8.0 packaging-21.3 pbr-5.9.0 pycparser-2.21 pyparsing-3.0.9 resolvelib-0.5.4 ruamel.yaml-0.17.21 ruamel.yaml.clib-0.2.6 zipp-3.6.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+[root@k8s-master kubespray]#
+]
+
+11 다음은 inventory.ini 파일을 설정하는 단계입니다. 우선 sample 디렉토리를 first_cluster로 copy 
+[root@k8s-master kubespray]# cp -rfp inventory/sample inventory/first_cluster
+
+12 firsy_cluster 디렉토리 내 inventory.ini 파일을 열어서 아래와 같이 서버를 등록
+(파일내용)
+[root@k8s-master first_cluster]# cat inventory.ini
+[
+[all]
+k8s-master  ansible_host=192.168.100.10 ip=192.168.100.10
+k8s-worker1 ansible_host=192.168.100.110 ip=192.168.100.110
+k8s-worker2 ansible_host=192.168.100.210 ip=192.168.100.210
+
+[kube_control_plane]
+k8s-master ansible_host=192.168.100.10 ip=192.168.100.10
+
+[etcd]
+k8s-master ansible_host=192.168.100.10 ip=192.168.100.10
+k8s-worker1 ansible_host=192.168.100.110 ip=192.168.100.110
+k8s-worker2 ansible_host=192.168.100.210 ip=192.168.100.210
+
+[kube_node]
+k8s-worker1 ansible_host=192.168.100.110 ip=192.168.100.110
+k8s-worker2 ansible_host=192.168.100.210 ip=192.168.100.210
+
+[calico_rr]
+
+[k8s_cluster:children]
+kube_control_plane
+kube_node
+calico_rr
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python2
+]
+
+13. 클러스터 생성
+[root@k8s-master-1 kubespray]# ansible-playbook  -i ./inventory/first_cluster/inventory.ini --become --become-user=root cluster.yml
+[
+화요일 21 6월 2022  16:27:56 +0900 (0:00:00.325)       0:20:05.950 ****************
+===============================================================================
+kubernetes/control-plane : kubeadm | Initialize first master ---------------------------------------------------------------------------- 64.18s
+kubernetes/preinstall : Install packages requirements ----------------------------------------------------------------------------------- 48.78s
+container-engine/containerd : download_file | Download item ----------------------------------------------------------------------------- 43.76s
+kubernetes/kubeadm : Join to cluster ---------------------------------------------------------------------------------------------------- 41.34s
+download : download_container | Download image if required ------------------------------------------------------------------------------ 37.52s
+download : download_container | Download image if required ------------------------------------------------------------------------------ 28.04s
+download : download_file | Validate mirrors --------------------------------------------------------------------------------------------- 24.64s
+download : download_container | Download image if required ------------------------------------------------------------------------------ 23.81s
+kubernetes-apps/ansible : Kubernetes Apps | Start Resources ----------------------------------------------------------------------------- 22.98s
+download : download_container | Download image if required ------------------------------------------------------------------------------ 22.83s
+download : download_file | Download item ------------------------------------------------------------------------------------------------ 22.42s
+download : download_container | Download image if required ------------------------------------------------------------------------------ 21.30s
+network_plugin/calico : Wait for calico kubeconfig to be created ------------------------------------------------------------------------ 19.38s
+network_plugin/calico : Calico | Create ipamconfig resources ---------------------------------------------------------------------------- 19.29s
+download : download_container | Download image if required ------------------------------------------------------------------------------ 18.10s
+download : download_file | Download item ------------------------------------------------------------------------------------------------ 17.79s
+download : download_container | Download image if required ------------------------------------------------------------------------------ 16.06s
+download : download_container | Download image if required ------------------------------------------------------------------------------ 14.89s
+network_plugin/calico : Calico | Create Calico Kubernetes datastore resources ----------------------------------------------------------- 14.82s
+bootstrap-os : Install libselinux python package ---------------------------------------------------------------------------------------- 12.48s
+[root@k8s-master kubespray]#
+
+]
+
+14. Alias 설정
+https://kubernetes.io/ko/docs/tasks/tools/included/optional-kubectl-configs-bash-linux/
+
+
+15. Ingress 설치  https://kubernetes.github.io/ingress-nginx/deploy/#bare-metal-clusters
+
+	[master]kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.2.0/deploy/static/provider/baremetal/deploy.yaml
+
+16. ingress 확인
+[
+POD_NAMESPACE=ingress-nginx
+POD_NAME=$(kubectl get pods -n $POD_NAMESPACE -l app.kubernetes.io/name=ingress-nginx --field-selector=status.phase=Running -o name)
+kubectl exec $POD_NAME -n $POD_NAMESPACE -- /nginx-ingress-controller --version
+
+[root@k8s-master ~]# POD_NAMESPACE=ingress-nginx
+[root@k8s-master ~]# POD_NAME=$(kubectl get pods -n $POD_NAMESPACE -l app.kubernetes.io/name=ingress-nginx --field-selector=status.phase=Running -o name)
+[root@k8s-master ~]# kubectl exec $POD_NAME -n $POD_NAMESPACE -- /nginx-ingress-controller --version
+-------------------------------------------------------------------------------
+NGINX Ingress controller
+  Release:       v1.2.0
+  Build:         a2514768cd282c41f39ab06bda17efefc4bd233a
+  Repository:    https://github.com/kubernetes/ingress-nginx
+  nginx version: nginx/1.19.10
+]
+-------------------------------------------------------------------------------
+16. golang 설치
+[
+[root@k8s-master helm]# yum install golang
+Resolving Dependencies
+--> Running transaction check
+---> Package golang.x86_64 0:1.17.7-1.el7 will be installed
+--> Processing Dependency: golang-bin = 1.17.7-1.el7 for package: golang-1.17.7-1.el7.x86_64
+--> Processing Dependency: golang-src = 1.17.7-1.el7 for package: golang-1.17.7-1.el7.x86_64
+--> Running transaction check
+---> Package golang-bin.x86_64 0:1.17.7-1.el7 will be installed
+---> Package golang-src.noarch 0:1.17.7-1.el7 will be installed
+--> Finished Dependency Resolution
+
+Dependencies Resolved
+
+======================================================================================================================================================
+ Package                              Arch                             Version                                   Repository                      Size
+======================================================================================================================================================
+Installing:
+ golang                               x86_64                           1.17.7-1.el7                              epel                           680 k
+Installing for dependencies:
+ golang-bin                           x86_64                           1.17.7-1.el7                              epel                            99 M
+ golang-src                           noarch                           1.17.7-1.el7                              epel                           8.9 M
+
+Transaction Summary
+======================================================================================================================================================
+Install  1 Package (+2 Dependent packages)
+
+Total download size: 108 M
+Installed size: 407 M
+Is this ok [y/d/N]: y
+Downloading packages:
+golang-bin-1.17.7-1.el7.x86_64 FAILED
+http://mirrors.nipa.cloud/epel/7/x86_64/Packages/g/golang-bin-1.17.7-1.el7.x86_64.rpm: [Errno 14] HTTP Error 404 - Not Found/s |    0 B  --:--:-- ETA
+Trying other mirror.
+To address this issue please refer to the below wiki article
+
+https://wiki.centos.org/yum-errors
+
+If above article doesn't help to resolve this issue please use https://bugs.centos.org/.
+
+(1/3): golang-1.17.7-1.el7.x86_64.rpm                                                                                          | 680 kB  00:00:00
+(2/3): golang-src-1.17.7-1.el7.noarch.rpm                                                                                      | 8.9 MB  00:00:06
+(3/3): golang-bin-1.17.7-1.el7.x86_64.rpm                                                                                      |  99 MB  00:00:40
+------------------------------------------------------------------------------------------------------------------------------------------------------
+Total                                                                                                                 2.6 MB/s | 108 MB  00:00:41
+Running transaction check
+Running transaction test
+Transaction test succeeded
+Running transaction
+  Installing : golang-src-1.17.7-1.el7.noarch                                                                                                     1/3
+  Installing : golang-1.17.7-1.el7.x86_64                                                                                                         2/3
+  Installing : golang-bin-1.17.7-1.el7.x86_64                                                                                                     3/3
+  Verifying  : golang-bin-1.17.7-1.el7.x86_64                                                                                                     1/3
+  Verifying  : golang-src-1.17.7-1.el7.noarch                                                                                                     2/3
+  Verifying  : golang-1.17.7-1.el7.x86_64                                                                                                         3/3
+
+Installed:
+  golang.x86_64 0:1.17.7-1.el7
+
+Dependency Installed:
+  golang-bin.x86_64 0:1.17.7-1.el7                                          golang-src.noarch 0:1.17.7-1.el7
+
+Complete!
+[root@k8s-master helm]#
+]
+
+17. Helm 설치 
+[
+kubectl을 사용할 수 있는 노드로 이동하여 설치합니다.
+
+[root@k8s-master helm]# ls
+get_helm.sh
+[root@k8s-master helm]# curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 > get_helm.sh
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 11156  100 11156    0     0  24094      0 --:--:-- --:--:-- --:--:-- 24147
+[root@k8s-master helm]# ls
+get_helm.sh
+[root@k8s-master helm]# chmod 700 get_helm.sh
+[root@k8s-master helm]# ./get_helm.sh
+Helm v3.9.0 is already latest
+[root@k8s-master helm]# helm version
+version.BuildInfo{Version:"v3.9.0", GitCommit:"7ceeda6c585217a19a1131663d8cd1f7d641b2a7", GitTreeState:"clean", GoVersion:"go1.17.5"}
+]
+
+18. helm chart repository를 추가해줍니다.
+[
+[root@k8s-master helm]# helm repo add brigade https://brigadecore.github.io/charts
+"brigade" has been added to your repositories
+[root@k8s-master helm]# helm search repo brigade
+NAME                            CHART VERSION   APP VERSION     DESCRIPTION
+brigade/brigade                 1.10.0          v1.5.0          Brigade provides event-driven scripting of Kube...
+brigade/brigade-github-app      0.8.0           v0.4.1          The Brigade GitHub App, an advanced gateway for...
+brigade/brigade-github-oauth    0.4.0           v0.20.0         The legacy OAuth GitHub Gateway for Brigade
+brigade/brigade-k8s-gateway     0.3.0                           A Helm chart for Kubernetes
+brigade/brigade-project         1.1.0           v1.0.0          Create a Brigade project
+brigade/kashti                  0.7.0           v0.4.0          A Helm chart for Kubernetes
+[root@k8s-master helm]# helm repo add stable https://kubernetes-charts.storage.googleapis.com
+Error: repo "https://kubernetes-charts.storage.googleapis.com" is no longer available; try "https://charts.helm.sh/stable" instead
+[root@k8s-master helm]# helm repo update
+Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "brigade" chart repository
+...Successfully got an update from the "stable" chart repository
+Update Complete. ⎈Happy Helming!⎈
+[root@k8s-master helm]#
+]
+
+19. helm 을 통한 istio 설치  https://istio.io/latest/docs/setup/install/helm/
+(가) helm repo 에 istio 추가 
+[
+[root@k8s-master helm]# helm repo add istio https://istio-release.storage.googleapis.com/charts
+"istio" has been added to your repositories
+[root@k8s-master helm]# helm repo update
+Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "istio" chart repository
+...Successfully got an update from the "brigade" chart repository
+...Successfully got an update from the "stable" chart repository
+Update Complete. ⎈Happy Helming!⎈
+[root@k8s-master helm]#
+]
+(나) istio-systemIstio 구성 요소에 대한 네임스페이스를 만듭니다 .
+[
+[root@k8s-master helm]# kubectl create namespace istio-system
+namespace/istio-system created
+[root@k8s-master helm]#
+]
+(다) Istio 컨트롤 플레인에서 사용하는 클러스터 전체 리소스가 포함된 Istio 기본 차트를 설치합니다.
+[
+[root@k8s-master helm]# helm install istio-base istio/base -n istio-system
+NAME: istio-base
+LAST DEPLOYED: Tue Jun 21 17:48:26 2022
+NAMESPACE: istio-system
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+Istio base successfully installed!
+
+To learn more about the release, try:
+  $ helm status istio-base
+  $ helm get all istio-base
+[root@k8s-master helm]#
+]
+(라) istiod서비스 를 배포하는 Istio 검색 차트를 설치합니다 .
+[
+[root@k8s-master helm]# helm install istiod istio/istiod -n istio-system --wait
+NAME: istiod
+LAST DEPLOYED: Tue Jun 21 17:50:09 2022
+NAMESPACE: istio-system
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+"istiod" successfully installed!
+
+To learn more about the release, try:
+  $ helm status istiod
+  $ helm get all istiod
+
+Next steps:
+  * Deploy a Gateway: https://istio.io/latest/docs/setup/additional-setup/gateway/
+  * Try out our tasks to get started on common configurations:
+    * https://istio.io/latest/docs/tasks/traffic-management
+    * https://istio.io/latest/docs/tasks/security/
+    * https://istio.io/latest/docs/tasks/policy-enforcement/
+    * https://istio.io/latest/docs/tasks/policy-enforcement/
+  * Review the list of actively supported releases, CVE publications and our hardening guide:
+    * https://istio.io/latest/docs/releases/supported-releases/
+    * https://istio.io/latest/news/security/
+    * https://istio.io/latest/docs/ops/best-practices/security/
+
+For further documentation see https://istio.io website
+
+Tell us how your install/upgrade experience went at https://forms.gle/yEtCbt45FZ3VoDT5A
+[root@k8s-master helm]#
+]
+(마) (선택 사항) 인그레스 게이트웨이를 설치합니다. <----에러남
+[
+[root@k8s-master helm]# kubectl create namespace istio-ingress
+[root@k8s-master helm]# kubectl label namespace istio-ingress istio-injection=enabled
+[root@k8s-master helm]# helm install istio-ingress istio/gateway -n istio-ingress --wait
+]
+
+
+
+======================================================================================================
+[참고]
+======================================================================================================
+[
+1. KubeSpray  기타 참고 파일
+🎈 Kubespray 파일 https://velog.io/@xxomlete/0516KubernetesKubespray%EB%A1%9C-k8s-%EC%84%A4%EC%B9%98
+cluster.yml : 클러스터 설치
+remove-node.yml : 쿠버네티스 클러스터에서 노드 제외
+reset.yml : 기존 정보 삭제하고 새로 구성 시 사용
+scale.yml : 복제시 사용
+upgrade-cluster.yml : 버전 업그레이드
+
+==============================================================================
+https://www.whatwant.com/tag/k8s
+https://lcc3108.github.io/articles/2020-12/istio
+https://lcc3108.github.io/articles/2020-12/istio
+
+
+2. deployment 삭제후 POD 삭제
+[ 강제삭제 옵션은 --force
+[root@k8s-master ~]# kpod
+NAMESPACE       NAME                                        READY   STATUS              RESTARTS      AGE    IP                NODE          NOMINATED NODE   READINESS GATES
+ingress-nginx   ingress-nginx-admission-create-qvskm        0/1     Completed           0             72m    10.233.65.3       k8s-worker2   <none>           <none>
+ingress-nginx   ingress-nginx-admission-patch-qj2z2         0/1     Completed           0             72m    10.233.73.1       k8s-worker1   <none>           <none>
+ingress-nginx   ingress-nginx-controller-6b864cf6dd-bpgll   0/1     Running             1 (86s ago)   72m    10.233.73.4       k8s-worker1   <none>           <none>
+istio-ingress   istio-ingress-54464bcb87-xn949              0/1     ContainerCreating   0             12m    <none>            k8s-worker2   <none>           <none>
+istio-system    istiod-bfc87fcb8-hk2kk                      1/1     Running             1 (86s ago)   15m    10.233.73.5       k8s-worker1   <none>           <none>
+kube-system     calico-node-s7fxk                           1/1     Running             2 (89s ago)   99m    192.168.100.210   k8s-worker2   <none>           <none>
+kube-system     calico-node-tgb9p                           1/1     Running             2 (86s ago)   99m    192.168.100.110   k8s-worker1   <none>           <none>
+kube-system     calico-node-wdn6m                           1/1     Running             2 (99s ago)   99m    192.168.100.10    k8s-master    <none>           <none>
+kube-system     coredns-666959ff67-2xnrv                    1/1     Running             2 (89s ago)   98m    10.233.65.157     k8s-worker2   <none>           <none>
+kube-system     coredns-666959ff67-cbhcj                    1/1     Running             2 (99s ago)   98m    10.233.111.6      k8s-master    <none>           <none>
+kube-system     dns-autoscaler-59b8867c86-xlcp2             1/1     Running             2 (99s ago)   98m    10.233.111.5      k8s-master    <none>           <none>
+kube-system     kube-apiserver-k8s-master                   1/1     Running             3 (99s ago)   102m   192.168.100.10    k8s-master    <none>           <none>
+kube-system     kube-controller-manager-k8s-master          1/1     Running             5 (51s ago)   102m   192.168.100.10    k8s-master    <none>           <none>
+kube-system     kube-proxy-829h9                            1/1     Running             2 (86s ago)   100m   192.168.100.110   k8s-worker1   <none>           <none>
+kube-system     kube-proxy-gxp2s                            1/1     Running             2 (88s ago)   100m   192.168.100.210   k8s-worker2   <none>           <none>
+kube-system     kube-proxy-vcrbq                            1/1     Running             2 (99s ago)   100m   192.168.100.10    k8s-master    <none>           <none>
+kube-system     kube-scheduler-k8s-master                   1/1     Running             3 (99s ago)   102m   192.168.100.10    k8s-master    <none>           <none>
+kube-system     nginx-proxy-k8s-worker1                     1/1     Running             2 (86s ago)   99m    192.168.100.110   k8s-worker1   <none>           <none>
+kube-system     nginx-proxy-k8s-worker2                     1/1     Running             2 (89s ago)   99m    192.168.100.210   k8s-worker2   <none>           <none>
+kube-system     nodelocaldns-tpc87                          1/1     Running             2 (99s ago)   98m    192.168.100.10    k8s-master    <none>           <none>
+kube-system     nodelocaldns-zknwm                          1/1     Running             2 (89s ago)   98m    192.168.100.210   k8s-worker2   <none>           <none>
+kube-system     nodelocaldns-zndkt                          1/1     Running             2 (85s ago)   98m    192.168.100.110   k8s-worker1   <none>           <none>
+
+[root@k8s-master ~]# k delete deployment istio-ingress -n istio-ingress
+deployment.apps "istio-ingress" deleted
+[root@k8s-master ~]# k delete pod istio-ingress-54464bcb87-xn949 -n istio-ingress
+]
+
+
+]
